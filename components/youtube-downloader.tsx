@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import type React from "react"
+
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -8,6 +10,7 @@ import { Loader2, Download, Youtube, AlertCircle, Clock, Eye } from "lucide-reac
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { formatDuration, formatNumber } from "@/lib/format-utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useDebounce } from "@/hooks/use-debounce"
 
 interface VideoInfo {
   videoId: string
@@ -32,26 +35,42 @@ export function YoutubeDownloader() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [selectedFormat, setSelectedFormat] = useState<string>("mp4")
 
+  // Usar debounce para não fazer muitas requisições enquanto digita
+  const debouncedUrl = useDebounce(url, 800)
+
+  // Ref para controlar se o componente está montado
+  const isMounted = useRef(true)
+
+  // Efeito para limpar na desmontagem
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
+
+  // Efeito para carregar o vídeo automaticamente quando a URL mudar (após o debounce)
+  useEffect(() => {
+    if (debouncedUrl && isValidYoutubeUrl(debouncedUrl)) {
+      fetchVideoInfo(debouncedUrl)
+    } else if (debouncedUrl) {
+      setError("Por favor, insira um link válido do YouTube")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedUrl])
+
   const isValidYoutubeUrl = (url: string) => {
     const regex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(.*)$/
     return regex.test(url)
   }
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-
-    if (!url.trim()) {
-      setError("Por favor, insira um link do YouTube")
-      return
-    }
-
-    if (!isValidYoutubeUrl(url)) {
-      setError("Por favor, insira um link válido do YouTube")
+  const fetchVideoInfo = async (videoUrl: string) => {
+    if (!videoUrl || !isValidYoutubeUrl(videoUrl)) {
       return
     }
 
     setError("")
     setLoading(true)
+    setVideoInfo(null)
 
     try {
       const response = await fetch("/api/video-info", {
@@ -59,8 +78,10 @@ export function YoutubeDownloader() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: videoUrl }),
       })
+
+      if (!isMounted.current) return
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -70,9 +91,24 @@ export function YoutubeDownloader() {
       const data = await response.json()
       setVideoInfo(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao processar o vídeo. Tente novamente.")
+      if (isMounted.current) {
+        setError(err instanceof Error ? err.message : "Erro ao processar o vídeo. Tente novamente.")
+      }
     } finally {
-      setLoading(false)
+      if (isMounted.current) {
+        setLoading(false)
+      }
+    }
+  }
+
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newUrl = e.target.value
+    setUrl(newUrl)
+
+    // Limpa o erro se o campo estiver vazio
+    if (!newUrl) {
+      setError("")
+      setVideoInfo(null)
     }
   }
 
@@ -84,14 +120,19 @@ export function YoutubeDownloader() {
     setDownloadError(null)
 
     try {
-      // Determina o formato com base no label
-      const outputFormat = format.label.toLowerCase().includes("mp3") ? "mp3" : selectedFormat
+      // Determina o formato com base na seleção do usuário
+      const outputFormat = selectedFormat
 
-      // Inicia o download
-      window.location.href = `/api/download-video?v=${videoInfo.videoId}&format=${outputFormat}`
+      // Abre o download em uma nova aba para evitar problemas de navegação
+      window.open(`/api/download-video?v=${videoInfo.videoId}&format=${outputFormat}`, "_blank")
 
       // Simula progresso de download (apenas visual)
       const interval = setInterval(() => {
+        if (!isMounted.current) {
+          clearInterval(interval)
+          return
+        }
+
         setDownloadProgress((prev) => {
           if (prev === null) return 0
           if (prev >= 100) {
@@ -104,14 +145,18 @@ export function YoutubeDownloader() {
 
       // Limpa o progresso após um tempo
       setTimeout(() => {
+        if (!isMounted.current) return
+
         clearInterval(interval)
         setDownloadProgress(null)
         setDownloading(null)
       }, 10000)
     } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Erro ao iniciar o download. Tente novamente.")
-      setDownloading(null)
-      setDownloadProgress(null)
+      if (isMounted.current) {
+        setDownloadError(err instanceof Error ? err.message : "Erro ao iniciar o download. Tente novamente.")
+        setDownloading(null)
+        setDownloadProgress(null)
+      }
     }
   }
 
@@ -119,29 +164,24 @@ export function YoutubeDownloader() {
     <div className="space-y-6">
       <Card className="border-2 border-gray-200 dark:border-gray-700">
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-grow">
-                <Youtube className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                <Input
-                  type="text"
-                  placeholder="Cole o link do YouTube aqui"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Button type="submit" disabled={loading} className="bg-red-600 hover:bg-red-700 text-white">
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Verificando...
-                  </>
-                ) : (
-                  "Verificar Vídeo"
-                )}
-              </Button>
+          <div className="space-y-4">
+            <div className="relative flex-grow">
+              <Youtube className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+              <Input
+                type="text"
+                placeholder="Cole o link do YouTube aqui para detecção automática"
+                value={url}
+                onChange={handleUrlChange}
+                className="pl-10"
+              />
             </div>
+
+            {loading && (
+              <div className="flex items-center justify-center py-2">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+                <span className="ml-2 text-sm text-gray-500">Buscando informações do vídeo...</span>
+              </div>
+            )}
 
             {error && (
               <Alert variant="destructive">
@@ -149,7 +189,7 @@ export function YoutubeDownloader() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-          </form>
+          </div>
         </CardContent>
       </Card>
 

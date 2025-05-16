@@ -1,26 +1,15 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-// Interface para informações do vídeo
-interface VideoDetails {
-  videoId: string
-  title: string
-  author: string
-  lengthSeconds: string
-  thumbnail: string
-  viewCount: string
-}
-
-// Interface para formatos de vídeo
-interface VideoFormat {
-  label: string
-  itag: number
-  qualityLabel?: string
-  mimeType?: string
-}
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const { url } = await request.json()
+    // Verificar se request está definido
+    if (!request) {
+      throw new Error("Request não definido")
+    }
+
+    // Obter o corpo da requisição
+    const body = await request.json().catch(() => ({}))
+    const { url } = body
 
     if (!url) {
       return NextResponse.json({ error: "URL do vídeo é obrigatória" }, { status: 400 })
@@ -63,40 +52,42 @@ function extractVideoId(url: string): string | null {
 
 // Função para buscar informações do vídeo
 async function fetchVideoInfo(videoId: string) {
-  // Simula a obtenção de informações do vídeo
-  // Em um ambiente de produção, você usaria uma API real do YouTube
+  try {
+    // Busca informações básicas do vídeo usando a API de oEmbed do YouTube
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    const oembedResponse = await fetch(oembedUrl)
 
-  // Busca informações básicas do vídeo usando a API de oEmbed do YouTube
-  const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
-  const oembedResponse = await fetch(oembedUrl)
+    if (!oembedResponse.ok) {
+      throw new Error("Não foi possível obter informações do vídeo")
+    }
 
-  if (!oembedResponse.ok) {
-    throw new Error("Não foi possível obter informações do vídeo")
-  }
+    const oembedData = await oembedResponse.json()
 
-  const oembedData = await oembedResponse.json()
+    // Cria um objeto com as informações do vídeo
+    const videoInfo = {
+      videoId: videoId,
+      title: oembedData.title || "Título não disponível",
+      author: oembedData.author_name || "Autor desconhecido",
+      lengthSeconds: "0", // Não disponível via oembed
+      thumbnail: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
+      viewCount: "0", // Não disponível via oembed
+    }
 
-  // Cria um objeto com as informações do vídeo
-  const videoInfo: VideoDetails = {
-    videoId: videoId,
-    title: oembedData.title || "Título não disponível",
-    author: oembedData.author_name || "Autor desconhecido",
-    lengthSeconds: "0", // Não disponível via oembed
-    thumbnail: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
-    viewCount: "0", // Não disponível via oembed
-  }
+    // Formatos disponíveis para download
+    // Em um ambiente real, você determinaria isso dinamicamente
+    const formats = [
+      { label: "720p", itag: 22, qualityLabel: "720p", mimeType: "video/mp4" },
+      { label: "480p", itag: 18, qualityLabel: "480p", mimeType: "video/mp4" },
+      { label: "360p", itag: 134, qualityLabel: "360p", mimeType: "video/mp4" },
+      { label: "MP3 (Áudio)", itag: 140, mimeType: "audio/mp4" },
+    ]
 
-  // Formatos disponíveis para download
-  // Em um ambiente real, você determinaria isso dinamicamente
-  const formats: VideoFormat[] = [
-    { label: "720p", itag: 22, qualityLabel: "720p", mimeType: "video/mp4" },
-    { label: "480p", itag: 18, qualityLabel: "480p", mimeType: "video/mp4" },
-    { label: "360p", itag: 134, qualityLabel: "360p", mimeType: "video/mp4" },
-    { label: "MP3 (Áudio)", itag: 140, mimeType: "audio/mp4" },
-  ]
-
-  return {
-    ...videoInfo,
-    formats,
+    return {
+      ...videoInfo,
+      formats,
+    }
+  } catch (error) {
+    console.error("Erro ao buscar informações do vídeo:", error)
+    throw error
   }
 }

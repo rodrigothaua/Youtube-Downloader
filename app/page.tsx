@@ -41,7 +41,7 @@ export default function Home() {
       <footer className="border-t border-gray-200 dark:border-gray-700 mt-20">
         <div className="container mx-auto px-4 py-6">
           <p className="text-center text-gray-500 dark:text-gray-400 text-sm">
-            © {new Date().getFullYear()} YouTube Downloader. Este serviço é apenas para uso educacional.
+            © {new Date().getFullYear()} YouTube Downloader. Todos os direitos reservados.
           </p>
         </div>
       </footer>
